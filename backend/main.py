@@ -1,4 +1,5 @@
 import sys
+import os
 from pathlib import Path
 import asyncio
 from fastapi import FastAPI, WebSocket
@@ -27,6 +28,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 app = FastAPI(title=settings.app_name, version="1.0.0")
 manager = LivePredictionManager()
 flush_task: asyncio.Task | None = None
+IS_VERCEL = os.getenv("VERCEL") == "1" or os.getenv("VERCEL_ENV") is not None
 
 origins = [origin.strip() for origin in settings.allowed_origins.split(",") if origin.strip()]
 
@@ -56,21 +58,24 @@ async def startup_event() -> None:
         socketTimeoutMS=1200,
     )
 
-    try:
-        await queue_service.connect()
-        log_info("redis_connected")
-    except Exception:
-        log_info("redis_unavailable_fallback")
+    if not IS_VERCEL:
+        try:
+            await queue_service.connect()
+            log_info("redis_connected")
+        except Exception:
+            log_info("redis_unavailable_fallback")
 
-    async def _flush_worker() -> None:
-        while True:
-            try:
-                await flush_redis_queue(batch_size=50)
-            except Exception:
-                pass
-            await asyncio.sleep(2.0)
+        async def _flush_worker() -> None:
+            while True:
+                try:
+                    await flush_redis_queue(batch_size=50)
+                except Exception:
+                    pass
+                await asyncio.sleep(2.0)
 
-    flush_task = asyncio.create_task(_flush_worker())
+        flush_task = asyncio.create_task(_flush_worker())
+    else:
+        log_info("vercel_runtime_detected")
     log_info("startup_complete")
 
 
